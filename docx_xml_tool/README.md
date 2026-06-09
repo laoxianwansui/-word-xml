@@ -29,8 +29,12 @@ The original `.docx` file is never modified.
 
 ## Requirements
 
-- Python 3.9 or newer
-- No third-party Python packages
+- Python 3.9 or newer. Python 3.13 is tested.
+- No third-party Python packages are required; the tool only uses the Python standard library.
+- Works on Windows, macOS, and Linux for the Python CLI.
+- The drag-and-drop launcher in `launchers/DOCX_XML_export.bat` is Windows-only.
+- For Chinese filenames or document text, use a UTF-8 capable terminal or editor. If Windows Command Prompt shows garbled Chinese, the generated files are usually still valid UTF-8; open `structure.md`, `text_index.json`, or `last_run.log` with a UTF-8 editor such as VS Code.
+- The input file must be a real `.docx` file. Legacy `.doc` files are not supported unless converted to `.docx` first.
 
 ## Quick start
 
