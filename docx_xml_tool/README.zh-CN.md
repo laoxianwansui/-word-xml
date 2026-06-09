@@ -29,8 +29,12 @@
 
 ## 环境要求
 
-- Python 3.9 或更高版本
-- 不需要安装第三方 Python 包
+- Python 3.9 或更高版本；已用 Python 3.13 测试。
+- 不需要安装第三方 Python 包，只使用 Python 标准库。
+- Python 命令行工具可在 Windows、macOS、Linux 上运行。
+- `launchers/DOCX_XML_export.bat` 拖拽启动器仅适用于 Windows。
+- 如果文件名或文档内容包含中文，建议使用支持 UTF-8 的终端或编辑器。Windows 命令提示符里看到中文乱码时，通常只是控制台显示问题，生成的 `structure.md`、`text_index.json`、`last_run.log` 等文件仍然是 UTF-8；建议用 VS Code 等编辑器打开查看。
+- 输入文件必须是真正的 `.docx` 文件；旧版 `.doc` 文件需要先转换为 `.docx`。
 
 ## 快速开始
 
