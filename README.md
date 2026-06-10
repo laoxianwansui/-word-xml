@@ -1,6 +1,8 @@
 # -word-xml
 
-# DOCX XML Tool v2.4（DOCX XML 导出与 Markdown 回写工具）
+当前版本：`docx_xml_tool_v2_4_1`。
+
+# DOCX XML Tool v2.4.1（DOCX XML 导出与 Markdown 回写工具）
 
 一个轻量、无第三方依赖的 Python 工具，用来把 `.docx` 文件展开成适合 AI 阅读和后续 XML 原位修改的工作区，导出可读 Markdown，并支持把指定文本安全回写成新的 Word 文档。
 
@@ -21,7 +23,7 @@
 
 ## 第一版 vs v2.4
 
-| 方面 | 第一版 `docx_xml_tool` | v2.4 增强版 |
+| 方面 | 第一版 `docx_xml_tool` | v2.4.1 |
 |---|---|---|
 | 核心导出 | `original.docx`、`unpacked/`、`pretty_xml/`、`manifest.json`、`structure.md`、`section_context.md`、`text_index.json`、`candidate_fields.yaml` | 全部保留 |
 | 编辑方式 | 通过 `replacements.json` 明确指定 XML 文本节点替换 | 新增 `document.md` + `content_map.json` 的 Markdown 语义编辑 |
@@ -297,7 +299,7 @@ fill_docx_workspace(workspace, replacements, output_docx)
 
 ## 命名和打包规则
 
-- 对外发布的工具目录建议命名为 `docx_xml_tool` 或 `docx_xml_tool_v2_4`。
+- 对外发布的工具目录建议命名为 `docx_xml_tool` 或 `docx_xml_tool_v2_4_1`。
 - 不建议在发布目录名里使用 `enhanced`、`final`、`new`、`test` 或纯日期后缀等过程性词。
 - 使用 `--workspace-root` 创建的工作区命名为 `YYYY-MM-DD_HHMMSS_<原文件名>`。
 - 使用 `--out` 时写入指定目录，不更新 `index.md`。
@@ -314,7 +316,7 @@ fill_docx_workspace(workspace, replacements, output_docx)
 LICENSE
 README.md
 README.zh-CN.md
-README_V2.4.md
+README_V2.4.1.md
 .gitignore
 docx_workspace_tool.py
 test_docx_workspace_tool.py
@@ -344,6 +346,65 @@ launchers/
 - 不要用这个工具再分发你无权分享的版权模板或文档。
 - 审计文件可能包含修改前后的文本，分享前也要检查。
 
+## v2.4.1 稳定范围
+
+v2.4.1 是进入 GUI 前的稳定收口版本。它重点增强复杂 Word 文件的安全边界，但不承诺完整理解所有 Word 版式。
+
+v2.4.1 会做：
+
+- 回写前拒绝缺失的 `<!--docx:block ...-->` 标记。
+- 拒绝重复 block 标记。
+- 拒绝 `content_map.json` 中不存在的 block id。
+- 生成更详细的 Markdown 回写审计，记录修改的 block、part、path、修改前文本、修改后文本。
+- 测试页眉、页脚、脚注、尾注的导出和回写。
+- 记录 `gridSpan` 和 `vMerge` 表格合并元数据。
+- 验证图片等未编辑包内容不会丢失。
+- 提供排除生成物和隐私文件的发布 zip 脚本。
+
+## 复杂 Word 安全模型
+
+复杂 Word 可能包含绘图层、文本框、重复可见文本、隐藏 XML 顺序、合并表格、页眉、页脚、脚注、尾注、图片、批注和修订。v2.4.1 的策略是保守处理：
+
+1. 保留原 DOCX 包，只重写已映射的 XML part。
+2. 把 `document.md` 当作编辑表层，不当作完整 Word 模型。
+3. 当 Markdown 标记和 `content_map.json` 不匹配时拒绝回写。
+4. 在审计文件中记录实际修改的 block，便于人工检查。
+5. 保留图片等未编辑包内容。
+6. 最终文件必须人工打开做视觉检查。
+
+## 知识库准备
+
+`document.md` 可以作为知识库输入，但完整知识库不要放在工具源码目录里。推荐位置：
+
+```text
+C:/Users/<你>/Documents/docx_knowledge_base/
+```
+
+每个导入文档建议至少保留：
+
+```text
+original.docx
+document.md
+content_map.json
+structure.md
+section_context.md
+text_index.json
+metadata.yaml
+chunks.jsonl
+```
+
+如果未来还要回写 DOCX，必须保留 `content_map.json`。多文档 RAG、向量索引、数据库检索属于后续版本，不属于 v2.4.1。
+
+## v2.4.1 暂不实现
+
+- GUI。
+- MCP 服务集成。
+- AI 编辑代理。
+- 多文档 RAG 或向量搜索。
+- 自动重建所有绘图层/文本框的视觉顺序。
+- 编辑图片、图表、SmartArt、公式、批注、修订、内容控件、宏、嵌入文件。
+- DOCX、Markdown、LaTeX、HTML 之间的双向同步。
+
 ## 测试
 
 运行自检：
@@ -356,6 +417,12 @@ python docx_workspace_tool.py --test
 
 ```bash
 python test_docx_workspace_tool.py
+```
+
+创建干净发布 zip：
+
+```bash
+python scripts/package_release.py
 ```
 
 ## 安全说明

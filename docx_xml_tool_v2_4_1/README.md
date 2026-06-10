@@ -1,4 +1,4 @@
-# DOCX XML Tool v2.4
+# DOCX XML Tool v2.4.1
 
 A dependency-free Python tool for unpacking `.docx` files into an AI-friendly XML workspace, exporting readable Markdown, and safely writing selected text changes back into a new Word document while preserving the original DOCX package structure.
 
@@ -19,7 +19,7 @@ The original `.docx` file is never modified.
 
 ## v1 vs v2.4
 
-| Area | v1 `docx_xml_tool` | v2.4 enhanced |
+| Area | v1 `docx_xml_tool` | v2.4.1 |
 |---|---|---|
 | Core export | `original.docx`, `unpacked/`, `pretty_xml/`, `manifest.json`, `structure.md`, `section_context.md`, `text_index.json`, `candidate_fields.yaml` | Same files retained |
 | Editing model | Explicit XML text-node replacement through `replacements.json` | Adds semantic Markdown editing through `document.md` plus `content_map.json` |
@@ -295,7 +295,7 @@ The function refuses to write when `old_text` does not match the target node. Th
 
 ## Naming and packaging rules
 
-- Keep the distributable tool folder named `docx_xml_tool` or `docx_xml_tool_v2_4`.
+- Keep the distributable tool folder named `docx_xml_tool` or `docx_xml_tool_v2_4_1`.
 - Avoid temporary package names such as `enhanced`, `final`, `new`, `test`, or date-only suffixes in released folders.
 - Workspaces created with `--workspace-root` use `YYYY-MM-DD_HHMMSS_<source-stem>`.
 - `--out` writes to the exact folder supplied and does not update `index.md`.
@@ -312,7 +312,7 @@ Before uploading or publishing this folder, check that the package contains only
 LICENSE
 README.md
 README.zh-CN.md
-README_V2.4.md
+README_V2.4.1.md
 .gitignore
 docx_workspace_tool.py
 test_docx_workspace_tool.py
@@ -342,6 +342,65 @@ If you want to include examples, create artificial sample documents with fake na
 - Do not use this tool to redistribute copyrighted templates or documents you do not have the right to share.
 - Audit files may contain before/after text. Review them before sharing.
 
+## v2.4.1 stability scope
+
+v2.4.1 is a stabilization release before the GUI work. It improves the safety boundary for complex Word files without claiming full Word layout understanding.
+
+What v2.4.1 does:
+
+- rejects missing `<!--docx:block ...-->` markers before writeback;
+- rejects duplicate block markers;
+- rejects block ids not present in `content_map.json`;
+- writes a richer Markdown apply audit with changed block ids, parts, paths, before text, and after text;
+- includes headers, footers, footnotes, and endnotes in Markdown export/apply tests;
+- records table merge metadata for `gridSpan` and `vMerge`;
+- verifies non-edited package parts such as images are preserved;
+- provides a release zip script with generated/private files excluded.
+
+## Complex Word safety model
+
+Complex Word files can contain drawing layers, text boxes, repeated visible text, hidden XML order, merged tables, headers, footers, notes, images, comments, and revision data. v2.4.1 handles this by being conservative:
+
+1. Preserve the original DOCX package and only rewrite mapped XML parts.
+2. Treat `document.md` as an editing surface, not a full Word model.
+3. Refuse writeback when Markdown markers no longer match `content_map.json`.
+4. Record changed blocks in the audit file so edits can be inspected.
+5. Preserve non-edited package parts such as media files.
+6. Require visual inspection of the generated DOCX before final use.
+
+## Knowledge base preparation
+
+`document.md` can be used as knowledge-base input, but the full knowledge base should live outside this source folder. Recommended location:
+
+```text
+C:/Users/<you>/Documents/docx_knowledge_base/
+```
+
+For each imported document, keep at least:
+
+```text
+original.docx
+ document.md
+content_map.json
+structure.md
+section_context.md
+text_index.json
+metadata.yaml
+chunks.jsonl
+```
+
+Keep `content_map.json` if you may ever write changes back to DOCX. Full multi-document RAG, vector indexes, and database-backed search are planned for a later version, not v2.4.1.
+
+## Not implemented in v2.4.1
+
+- GUI.
+- MCP server integration.
+- AI editing agent.
+- Multi-document RAG or vector search.
+- Automatic visual-order reconstruction for every Word drawing/textbox layout.
+- Editing images, charts, SmartArt, equations, comments, tracked changes, content controls, macros, or embedded files.
+- Bidirectional sync among DOCX, Markdown, LaTeX, and HTML.
+
 ## Testing
 
 Run the self-test:
@@ -354,6 +413,12 @@ Run the unit tests:
 
 ```bash
 python test_docx_workspace_tool.py
+```
+
+Create a clean release zip:
+
+```bash
+python scripts/package_release.py
 ```
 
 ## Safety notes

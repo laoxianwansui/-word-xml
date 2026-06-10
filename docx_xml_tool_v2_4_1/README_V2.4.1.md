@@ -1,6 +1,6 @@
-# DOCX XML Tool v2.4 Enhanced Overview
+# DOCX XML Tool v2.4.1 Overview
 
-这是在第一版 `docx_xml_tool` 基础上叠加 Markdown 编辑/回写能力的 v2.4 版本。核心原则不变：不重建 Word 文档，不修改原始 DOCX，只基于原 DOCX 包和 XML 映射生成新的 `.docx`。
+这是在第一版 `docx_xml_tool` 基础上叠加 Markdown 编辑/回写能力的 v2.4.1 版本。核心原则不变：不重建 Word 文档，不修改原始 DOCX，只基于原 DOCX 包和 XML 映射生成新的 `.docx`。
 
 ## 相较第一版的改进
 
@@ -51,7 +51,7 @@ text_index.json
 candidate_fields.yaml
 ```
 
-同时新增 v2.4 文件：
+同时新增 v2.4.1 文件：
 
 ```text
 document.md
@@ -156,9 +156,23 @@ __pycache__/
 - 复杂功能如批注、修订、内容控件、公式、图表、SmartArt、宏、复杂绘图布局等不保证干净往返。
 - 更适合文本级编辑，不适合重新设计版式或复刻模板。
 
+## v2.4.1 稳定增强
+
+v2.4.1 是进入 GUI 前的稳定收口版本，重点不是“自动理解所有复杂 Word”，而是更安全地识别风险、拒绝危险回写、保留未编辑包内容，并让审计文件可追踪。
+
+新增重点：
+
+- 回写前检查 `document.md` 和 `content_map.json` 是否匹配。
+- 缺失、重复、未知的 `<!--docx:block ...-->` 标记会被拒绝。
+- Markdown 回写审计会列出修改的 block、XML part、path、修改前后文本。
+- 补充页眉、页脚、脚注、尾注、合并表格、图片保留等回归测试。
+- 提供 `scripts/package_release.py` 生成干净发布 zip。
+
+仍不做：GUI、MCP、AI 编辑、多文档 RAG、向量索引、自动重建所有复杂版式、编辑图片/图表/公式/批注/修订/宏。
+
 ## 命名和打包规则
 
-- 对外发布目录建议命名为 `docx_xml_tool` 或 `docx_xml_tool_v2_4`。
+- 对外发布目录建议命名为 `docx_xml_tool` 或 `docx_xml_tool_v2_4_1`。
 - 避免使用 `enhanced`、`final`、`new`、`test` 这类过程性目录名作为最终发布名。
 - 导出工作区命名规则：`YYYY-MM-DD_HHMMSS_<原文件名>`。
 - Markdown 回写输出命名规则：`edits/markdown_output_001.docx`、`edits/markdown_output_002.docx`，依次递增。

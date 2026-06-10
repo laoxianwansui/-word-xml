@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+from docx_markdown.engine import DocxCore, DocxCoreError
+
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 PKG_CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
 NS = {"w": W_NS}
@@ -464,10 +466,88 @@ def export_docx_xml(input_docx, output_dir=None, workspace_root=None):
     write_structure(output_path / "structure.md", input_path.name, manifest, structure, text_index)
     write_section_context(output_path / "section_context.md", text_nodes)
     fields = write_candidate_fields(output_path / "candidate_fields.yaml", text_index)
+    write_v24_markdown_outputs(input_path, output_path)
     if workspace_root and not output_dir:
         append_workspace_index(Path(workspace_root).resolve(), input_path.name, output_path)
 
     print_summary(output_path, manifest, structure, text_index, fields)
+    return output_path
+
+
+def write_v24_markdown_outputs(input_docx, output_path):
+    core = DocxCore()
+    core.export(Path(input_docx), Path(output_path))
+
+
+def next_markdown_edit_paths(workspace_dir, output_docx=None):
+    edits_dir = workspace_dir / "edits"
+    edits_dir.mkdir(parents=True, exist_ok=True)
+    existing = sorted(edits_dir.glob("markdown_output_*.docx"))
+    next_number = len(existing) + 1
+    audit_path = edits_dir / f"markdown_apply_audit_{next_number:03d}.md"
+    if output_docx:
+        output_path = Path(output_docx).resolve()
+    else:
+        output_path = edits_dir / f"markdown_output_{next_number:03d}.docx"
+    return edits_dir, output_path, audit_path
+
+
+def apply_markdown_workspace(workspace_dir, output_docx=None):
+    workspace_dir = Path(workspace_dir).resolve()
+    original_docx = workspace_dir / "original.docx"
+    markdown = workspace_dir / "document.md"
+    content_map = workspace_dir / "content_map.json"
+    if not original_docx.exists():
+        raise FileNotFoundError(f"找不到 original.docx：{original_docx}")
+    if not markdown.exists():
+        raise FileNotFoundError(f"找不到 document.md：{markdown}")
+    if not content_map.exists():
+        raise FileNotFoundError(f"找不到 content_map.json：{content_map}")
+    edits_dir, output_path, audit_path = next_markdown_edit_paths(workspace_dir, output_docx)
+    core = DocxCore()
+    result = core.apply(original_docx, markdown, content_map, output_path)
+    audit_lines = [
+        "# Markdown Apply Audit",
+        "",
+        f"Workspace: {workspace_dir}",
+        f"Markdown: {markdown}",
+        f"Content map: {content_map}",
+        f"Output DOCX: {output_path}",
+        "",
+        "## Summary",
+        "",
+        f"changed_blocks: {len(result.changed_blocks)}",
+        f"unchanged_blocks: {len(result.unchanged_blocks)}",
+        f"warnings: {len(result.warnings)}",
+        "",
+    ]
+    if result.changed_blocks:
+        audit_lines.extend(["## Changed blocks", ""])
+        for item in result.changed_blocks:
+            audit_lines.extend([
+                f"### {item['block_id']}",
+                "",
+                f"kind: {item['kind']}",
+                f"part: {item['part']}",
+                f"path: {item['path']}",
+                "",
+                "before:",
+                "```text",
+                str(item["old_text"]),
+                "```",
+                "",
+                "after:",
+                "```text",
+                str(item["new_text"]),
+                "```",
+                "",
+            ])
+    if result.warnings:
+        audit_lines.extend(["## Warnings", ""])
+        audit_lines.extend(f"- {warning}" for warning in result.warnings)
+        audit_lines.append("")
+    audit_lines.extend(["## Verification", "", "zip_test: ok", ""])
+    audit_path.write_text("\n".join(audit_lines), encoding="utf-8")
     return output_path
 
 
@@ -573,6 +653,8 @@ def main():
     parser.add_argument("input", nargs="?", help="输入 .docx 文件路径")
     parser.add_argument("--out", help="输出目录；指定后不会写入工作区 index.md")
     parser.add_argument("--workspace-root", help="统一工作区根目录；未指定 --out 时输出到 时间_文件名 子目录并更新 index.md")
+    parser.add_argument("--apply-md", action="store_true", help="把工作区 document.md 回写成新的 DOCX")
+    parser.add_argument("--output", help="--apply-md 时指定输出 DOCX 路径")
     parser.add_argument("--test", action="store_true", help="运行自检")
     args = parser.parse_args()
     if args.test:
@@ -580,6 +662,14 @@ def main():
         return
     if not args.input:
         parser.print_help()
+        return
+    if args.apply_md:
+        try:
+            output_path = apply_markdown_workspace(args.input, args.output)
+            print(f"Markdown 回写完成：{output_path}")
+        except DocxCoreError as exc:
+            print(f"错误：{exc}", file=sys.stderr)
+            raise SystemExit(2)
         return
     export_docx_xml(args.input, args.out, args.workspace_root)
 

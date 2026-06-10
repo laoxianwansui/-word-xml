@@ -68,6 +68,13 @@ class ExportResult:
     format_profile: Dict[str, object]
 
 
+@dataclass
+class ApplyResult:
+    changed_blocks: List[Dict[str, object]] = field(default_factory=list)
+    unchanged_blocks: List[Dict[str, object]] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+
 class DocxCore:
     def export(self, input_docx: Path, output_dir: Path) -> ExportResult:
         input_docx = Path(input_docx)
@@ -136,7 +143,7 @@ class DocxCore:
         (output_dir / "format_profile.yaml").write_text(self._to_simple_yaml(format_profile), encoding="utf-8")
         return ExportResult(markdown, content_map, format_profile)
 
-    def apply(self, original_docx: Path, edited_markdown: Path, content_map: Path, output_docx: Path) -> None:
+    def apply(self, original_docx: Path, edited_markdown: Path, content_map: Path, output_docx: Path) -> ApplyResult:
         original_docx = Path(original_docx)
         edited_markdown = Path(edited_markdown)
         content_map = Path(content_map)
@@ -152,12 +159,17 @@ class DocxCore:
         except json.JSONDecodeError as exc:
             raise DocxCoreError("content_map.json格式损坏，无法读取回写映射。") from exc
 
-        replacements = self._extract_markdown_blocks(edited_markdown.read_text(encoding="utf-8"))
-        block_defs = {item["block_id"]: item for item in mapping.get("blocks", [])}
+        replacements, duplicate_ids = self._extract_markdown_blocks(edited_markdown.read_text(encoding="utf-8"))
+        blocks = mapping.get("blocks", [])
+        if not isinstance(blocks, list):
+            raise DocxCoreError("content_map.json缺少有效的blocks列表，无法安全回写。")
+        block_defs = {item["block_id"]: item for item in blocks}
+        self._validate_markdown_mapping(replacements, block_defs, duplicate_ids)
         touched_parts = {item["part"] for item in block_defs.values() if item["block_id"] in replacements}
         if not touched_parts:
             raise DocxCoreError("Markdown中没有找到可回写的docx:block标记。")
 
+        result = self._build_apply_result(blocks, replacements)
         output_docx.parent.mkdir(parents=True, exist_ok=True)
         try:
             replacements_by_part: Dict[str, bytes] = {}
@@ -169,6 +181,7 @@ class DocxCore:
                 self._rewrite_zip(archive, output_docx, replacements_by_part)
         except zipfile.BadZipFile as exc:
             raise DocxCoreError("输出DOCX写入失败，原文件可能已损坏。") from exc
+        return result
 
     def _validate_docx(self, path: Path) -> None:
         if not path.exists():
@@ -208,7 +221,7 @@ class DocxCore:
         names = set(archive.namelist())
         parts = [
             name for name in names
-            if re.match(r"word/(header|footer)\d+\.xml$", name) or name == "word/footnotes.xml"
+            if re.match(r"word/(header|footer)\d+\.xml$", name) or name in {"word/footnotes.xml", "word/endnotes.xml"}
         ]
         return sorted(parts)
 
@@ -221,6 +234,8 @@ class DocxCore:
             return "页脚"
         if part_name.endswith("footnotes.xml"):
             return "脚注"
+        if part_name.endswith("endnotes.xml"):
+            return "尾注"
         return part_name
 
     def _parse_part(self, root: ET.Element, part_name: str, block_offset: int) -> Tuple[List[Block], List[Tuple[str, str]], List[Dict[str, object]]]:
@@ -250,21 +265,25 @@ class DocxCore:
                 table_index += 1
 
         if part_name.endswith("footnotes.xml"):
-            footnote_blocks, next_counter = self._parse_footnotes(root, part_name, block_counter)
-            blocks.extend(footnote_blocks)
+            note_blocks, next_counter = self._parse_notes(root, part_name, block_counter, "footnote", "footnote_id")
+            blocks.extend(note_blocks)
+            block_counter = next_counter
+        if part_name.endswith("endnotes.xml"):
+            note_blocks, next_counter = self._parse_notes(root, part_name, block_counter, "endnote", "endnote_id")
+            blocks.extend(note_blocks)
             block_counter = next_counter
         return blocks, table_markdown, table_profiles
 
-    def _parse_footnotes(self, root: ET.Element, part_name: str, block_counter: int) -> Tuple[List[Block], int]:
+    def _parse_notes(self, root: ET.Element, part_name: str, block_counter: int, kind: str, metadata_key: str) -> Tuple[List[Block], int]:
         blocks: List[Block] = []
-        for note in root.findall("w:footnote", NS):
+        for note in root.findall(f"w:{kind}", NS):
             note_id = note.attrib.get(w_tag("id"), "")
             if note_id in {"-1", "0"}:
                 continue
             text = self._element_text(note)
             if text.strip():
                 block_id = f"b{block_counter:05d}"
-                blocks.append(Block(block_id, "footnote", part_name, text, path=f"footnote[{note_id}]", metadata={"footnote_id": note_id}))
+                blocks.append(Block(block_id, kind, part_name, text, path=f"{kind}[{note_id}]", metadata={metadata_key: note_id}))
                 block_counter += 1
         return blocks, block_counter
 
@@ -352,7 +371,7 @@ class DocxCore:
                 lines.append(block.text.strip())
                 continue
             lines.append(f"\n<!--docx:block {block.block_id}-->")
-            prefix = "> " if block.kind == "footnote" else ""
+            prefix = "> " if block.kind in {"footnote", "endnote"} else ""
             lines.append(prefix + block.text.strip())
         return "\n".join(lines).strip()
 
@@ -381,21 +400,59 @@ class DocxCore:
                 fragments.append("\n")
         return "".join(fragments)
 
-    def _extract_markdown_blocks(self, markdown: str) -> Dict[str, str]:
+    def _extract_markdown_blocks(self, markdown: str) -> Tuple[Dict[str, str], List[str]]:
         marker = re.compile(r"^<!--docx:block\s+([A-Za-z0-9_-]+)-->", re.MULTILINE)
         matches = list(marker.finditer(markdown))
         replacements: Dict[str, str] = {}
+        duplicate_ids: List[str] = []
         for idx, match in enumerate(matches):
             block_id = match.group(1)
+            if block_id in replacements and block_id not in duplicate_ids:
+                duplicate_ids.append(block_id)
             start = match.end()
             end = matches[idx + 1].start() if idx + 1 < len(matches) else len(markdown)
             raw = markdown[start:end]
             raw = re.sub(r"\n?<!--docx:table\s+\d+-->.*?(?=\n<!--docx:block|\Z)", "", raw, flags=re.S)
+            raw = "\n".join(line for line in raw.splitlines() if not line.startswith("## "))
             text = raw.strip()
             if text.startswith("> "):
                 text = "\n".join(line[2:] if line.startswith("> ") else line for line in text.splitlines())
             replacements[block_id] = text.replace("<br>", "\n")
-        return replacements
+        return replacements, duplicate_ids
+
+    def _validate_markdown_mapping(self, replacements: Dict[str, str], block_defs: Dict[str, Dict[str, object]], duplicate_ids: List[str]) -> None:
+        if duplicate_ids:
+            raise DocxCoreError(f"Markdown中存在重复的docx:block标记：{', '.join(sorted(duplicate_ids))}")
+        replacement_ids = set(replacements)
+        expected_ids = set(block_defs)
+        unknown = sorted(replacement_ids - expected_ids)
+        if unknown:
+            raise DocxCoreError(f"Markdown中存在content_map.json无法识别的docx:block标记：{', '.join(unknown)}")
+        missing = sorted(expected_ids - replacement_ids)
+        if missing:
+            shown = ", ".join(missing[:10])
+            suffix = "..." if len(missing) > 10 else ""
+            raise DocxCoreError(f"Markdown缺少必要的docx:block标记：{shown}{suffix}")
+
+    def _build_apply_result(self, blocks: List[Dict[str, object]], replacements: Dict[str, str]) -> ApplyResult:
+        result = ApplyResult()
+        for block in blocks:
+            block_id = str(block.get("block_id", ""))
+            old_text = str(block.get("text", ""))
+            new_text = replacements.get(block_id, "")
+            item = {
+                "block_id": block_id,
+                "kind": block.get("kind", ""),
+                "part": block.get("part", ""),
+                "path": block.get("path", ""),
+                "old_text": old_text,
+                "new_text": new_text,
+            }
+            if old_text != new_text:
+                result.changed_blocks.append(item)
+            else:
+                result.unchanged_blocks.append(item)
+        return result
 
     def _apply_part(self, root: ET.Element, part: str, block_defs: Dict[str, Dict[str, object]], replacements: Dict[str, str]) -> None:
         body = root.find("w:body", NS)
@@ -421,7 +478,12 @@ class DocxCore:
                     self._replace_element_text(tc, text)
             elif kind == "footnote":
                 footnote_id = str(block.get("metadata", {}).get("footnote_id", ""))
-                note = self._find_footnote(root, footnote_id)
+                note = self._find_note(root, "footnote", footnote_id)
+                if note is not None:
+                    self._replace_element_text(note, text)
+            elif kind == "endnote":
+                endnote_id = str(block.get("metadata", {}).get("endnote_id", ""))
+                note = self._find_note(root, "endnote", endnote_id)
                 if note is not None:
                     self._replace_element_text(note, text)
 
@@ -453,9 +515,9 @@ class DocxCore:
                     data = source.read(info.filename)
                 target.writestr(info, data)
 
-    def _find_footnote(self, root: ET.Element, footnote_id: str) -> Optional[ET.Element]:
-        for note in root.findall("w:footnote", NS):
-            if note.attrib.get(w_tag("id"), "") == footnote_id:
+    def _find_note(self, root: ET.Element, kind: str, note_id: str) -> Optional[ET.Element]:
+        for note in root.findall(f"w:{kind}", NS):
+            if note.attrib.get(w_tag("id"), "") == note_id:
                 return note
         return None
 

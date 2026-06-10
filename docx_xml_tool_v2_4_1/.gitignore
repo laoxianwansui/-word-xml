@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Generated DOCX workspaces and logs
+docx_xml_outputs/
+*_docx_xml/
+edits/
+last_run.log
+markdown_apply_last_run.log
+*.log
+
+# Local office files and temporary files
+~$*.docx
+*.tmp
+.DS_Store
+Thumbs.db
